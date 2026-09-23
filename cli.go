@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 )
@@ -22,6 +21,7 @@ var spanishWeekdays = map[time.Weekday]string{
 // CLI is the root command. Global flags apply to every subcommand.
 type CLI struct {
 	Comedor string `help:"Only show a specific comedor (matches by substring, case-insensitive)." short:"c"`
+	Veggy   bool   `help:"Only show the vegetarian/vegan menu option (Menú 2)." short:"g"`
 
 	Today    TodayCmd    `cmd:"" default:"withargs" help:"Show today's menu (default)."`
 	Tomorrow TomorrowCmd `cmd:"" help:"Show tomorrow's menu."`
@@ -49,7 +49,7 @@ type WeekCmd struct{}
 func (c *WeekCmd) Run(cli *CLI) error {
 	menu := getMenu()
 
-	keys, byKey := groupDaysByDate(menu.Comedores, cli.Comedor)
+	keys, byKey := groupDaysByDate(menu.Comedores, cli.Comedor, cli.Veggy)
 	for _, key := range keys {
 		printMergedDay(byKey[key])
 	}
@@ -71,6 +71,13 @@ func showDay(cli *CLI, weekday time.Weekday) error {
 		for _, day := range comedor.Days {
 			if day.DayName != dayName {
 				continue
+			}
+			if cli.Veggy {
+				filtered, ok := filterVeggie(day)
+				if !ok {
+					continue
+				}
+				day = filtered
 			}
 			matches = append(matches, namedDay{Name: comedor.Name, Day: day})
 		}
@@ -106,8 +113,9 @@ type namedDay struct {
 
 // groupDaysByDate collects every comedor's days (filtered by the --comedor
 // flag), keyed by "DayName|Date" and in first-seen order, so the week can
-// be printed date by date across comedores.
-func groupDaysByDate(comedores []Comedor, filter string) ([]string, map[string][]namedDay) {
+// be printed date by date across comedores. If veggyOnly is set, only the
+// "Menú 2" option is kept, and days without one are skipped.
+func groupDaysByDate(comedores []Comedor, filter string, veggyOnly bool) ([]string, map[string][]namedDay) {
 	var keys []string
 	byKey := make(map[string][]namedDay)
 
@@ -116,6 +124,14 @@ func groupDaysByDate(comedores []Comedor, filter string) ([]string, map[string][
 			continue
 		}
 		for _, day := range comedor.Days {
+			if veggyOnly {
+				filtered, ok := filterVeggie(day)
+				if !ok {
+					continue
+				}
+				day = filtered
+			}
+
 			key := day.DayName + "|" + day.Date
 			if _, ok := byKey[key]; !ok {
 				keys = append(keys, key)
@@ -127,16 +143,34 @@ func groupDaysByDate(comedores []Comedor, filter string) ([]string, map[string][
 	return keys, byKey
 }
 
+// filterVeggie returns a copy of day containing only its "Menú 2" option,
+// which is the vegetarian/vegan alternative on this site. It reports false
+// if the day has no such option.
+func filterVeggie(day Day) (Day, bool) {
+	var menus []MenuOption
+	for _, m := range day.Menus {
+		if normalizeText(m.Name) == "menú 2" {
+			menus = append(menus, m)
+		}
+	}
+	if len(menus) == 0 {
+		return Day{}, false
+	}
+
+	return Day{DayName: day.DayName, Date: day.Date, Menus: menus}, true
+}
+
 // printMergedDay prints one day's menu, merging comedores whose menus are
-// identical into a single entry (e.g. "Fuentenueva / Cartuja") instead of
-// repeating the same dishes for each comedor.
+// essentially the same (allowing for typos and minor wording/allergen
+// differences, see menusMatch) into a single entry (e.g. "Fuentenueva /
+// Cartuja") instead of repeating near-identical dishes for each comedor.
 func printMergedDay(entries []namedDay) {
 	var groups [][]namedDay
 
 	for _, entry := range entries {
 		placed := false
 		for i, group := range groups {
-			if reflect.DeepEqual(group[0].Day.Menus, entry.Day.Menus) {
+			if menusMatch(group[0].Day.Menus, entry.Day.Menus) {
 				groups[i] = append(group, entry)
 				placed = true
 				break
@@ -152,7 +186,7 @@ func printMergedDay(entries []namedDay) {
 		for i, entry := range group {
 			names[i] = entry.Name
 		}
-		printComedorDay(strings.Join(names, " / "), group[0].Day)
+		printComedorDay(strings.Join(names, " / "), mergeDay(group))
 	}
 }
 
