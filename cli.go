@@ -2,8 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/fatih/color"
+)
+
+var (
+	headerColor   = color.New(color.Bold, color.FgCyan)
+	menuNameColor = color.New(color.Bold, color.FgGreen)
+	dishTypeColor = color.New(color.FgYellow)
+	allergenColor = color.New(color.FgRed)
 )
 
 // spanishWeekdays maps Go's Weekday to the uppercase Spanish day names
@@ -50,9 +61,12 @@ func (c *WeekCmd) Run(cli *CLI) error {
 	menu := getMenu()
 
 	keys, byKey := groupDaysByDate(menu.Comedores, cli.Comedor, cli.Veggy)
-	for _, key := range keys {
-		printMergedDay(byKey[key])
-	}
+
+	withPager(func(w io.Writer) {
+		for _, key := range keys {
+			printMergedDay(w, byKey[key])
+		}
+	})
 
 	return nil
 }
@@ -92,7 +106,7 @@ func showDay(cli *CLI, weekday time.Weekday) error {
 		return nil
 	}
 
-	printMergedDay(matches)
+	printMergedDay(os.Stdout, matches)
 
 	return nil
 }
@@ -164,7 +178,7 @@ func filterVeggie(day Day) (Day, bool) {
 // essentially the same (allowing for typos and minor wording/allergen
 // differences, see menusMatch) into a single entry (e.g. "Fuentenueva /
 // Cartuja") instead of repeating near-identical dishes for each comedor.
-func printMergedDay(entries []namedDay) {
+func printMergedDay(w io.Writer, entries []namedDay) {
 	var groups [][]namedDay
 
 	for _, entry := range entries {
@@ -186,21 +200,22 @@ func printMergedDay(entries []namedDay) {
 		for i, entry := range group {
 			names[i] = entry.Name
 		}
-		printComedorDay(strings.Join(names, " / "), mergeDay(group))
+		printComedorDay(w, strings.Join(names, " / "), mergeDay(group))
 	}
 }
 
-func printComedorDay(comedorName string, day Day) {
-	fmt.Printf("\n=== %s \u2014 %s, %s ===\n", comedorName, day.DayName, day.Date)
+func printComedorDay(w io.Writer, comedorName string, day Day) {
+	headerColor.Fprintf(w, "\n=== %s \u2014 %s, %s ===\n", comedorName, day.DayName, day.Date)
 
 	for _, m := range day.Menus {
-		fmt.Println(m.Name)
+		menuNameColor.Fprintln(w, m.Name)
 		for _, dish := range m.Dishes {
-			line := fmt.Sprintf("  %-16s %s", dish.Type, dish.Name)
+			dishTypeColor.Fprintf(w, "  %-16s", dish.Type)
+			fmt.Fprint(w, dish.Name)
 			if len(dish.Allergens) > 0 {
-				line += " (" + strings.Join(dish.Allergens, ", ") + ")"
+				allergenColor.Fprintf(w, " (%s)", strings.Join(dish.Allergens, ", "))
 			}
-			fmt.Println(line)
+			fmt.Fprintln(w)
 		}
 	}
 }
