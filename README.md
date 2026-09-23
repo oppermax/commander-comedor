@@ -21,3 +21,7 @@ commander-comedor --veggy         # only the vegetarian/vegan option (Menú 2)
 
 Comedores with identical (or near-identical, typos included) menus are merged
 in the output.
+
+## License
+
+MIT
